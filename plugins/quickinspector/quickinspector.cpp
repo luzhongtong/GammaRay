@@ -27,6 +27,7 @@
 */
 
 #include "quickinspector.h"
+#include "quickoverlay.h"
 #include "quickitemmodel.h"
 #include "quickscenegraphmodel.h"
 #include "quickpaintanalyzerextension.h"
@@ -41,6 +42,7 @@
 #include <core/metaobject.h>
 #include <core/metaobjectrepository.h>
 #include <core/objecttypefilterproxymodel.h>
+#include <core/probeguard.h>
 #include <core/probeinterface.h>
 #include <core/propertycontroller.h>
 #include <core/remote/server.h>
@@ -250,6 +252,8 @@ QuickInspector::QuickInspector(ProbeInterface *probe, QObject *parent)
     registerVariantHandlers();
     probe->installGlobalEventFilter(this);
 
+    recreateOverlayItem();
+
     QAbstractProxyModel *windowModel = new ObjectTypeFilterProxyModel<QQuickWindow>(this);
     windowModel->setSourceModel(probe->objectListModel());
     QAbstractProxyModel *proxy = new SingleColumnObjectProxyModel(this);
@@ -297,6 +301,9 @@ QuickInspector::QuickInspector(ProbeInterface *probe, QObject *parent)
 
 QuickInspector::~QuickInspector()
 {
+    disconnect(m_overlayItem, SIGNAL(destroyed(QObject*)),
+               this, SLOT(recreateOverlayItem()));
+    delete m_overlayItem.data();
 }
 
 void QuickInspector::selectWindow(int index)
@@ -409,6 +416,19 @@ void QuickInspector::objectCreated(QObject *object)
             m_probe->discoverObject(engine);
         }
     }
+}
+
+void QuickInspector::recreateOverlayItem()
+{
+    ProbeGuard guard;
+    m_overlayItem = new OverlayItem;
+    m_overlayItem->hide();
+
+    // the target application might have destroyed the overlay widget
+    // (e.g. because the parent of the overlay got destroyed).
+    // just recreate a new one in this case
+    connect(m_overlayItem, SIGNAL(destroyed(QObject*)),
+            this, SLOT(recreateOverlayItem()));
 }
 
 void QuickInspector::sendRenderedScene(const QImage &currentFrame)
@@ -611,6 +631,8 @@ void QuickInspector::itemSelectionChanged(const QItemSelection &selection)
                                    |QItemSelectionModel::Rows
                                    |QItemSelectionModel::Current);
     }
+
+    m_overlayItem->placeOn(m_currentItem.data());
 
     if (m_window)
         m_window->update();

@@ -22,6 +22,7 @@ if(Qt5Quick_FOUND AND HAVE_PRIVATE_Qt5Quick_HEADERS AND NOT ${Qt5Quick_VERSION} 
     quickinspector.cpp
     quickitemmodel.cpp
     quickscenegraphmodel.cpp
+    quickoverlay.cpp
     quickpaintanalyzerextension.cpp
 
     materialextension/materialextension.cpp

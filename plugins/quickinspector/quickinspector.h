@@ -54,6 +54,7 @@ QT_END_NAMESPACE
 
 namespace GammaRay {
 class PropertyController;
+class OverlayItem;
 class QuickItemModel;
 class QuickSceneGraphModel;
 class RemoteViewServer;
@@ -104,6 +105,7 @@ private slots:
     void objectSelected(QObject *object);
     void objectSelected(void *object, const QString &typeName);
     void objectCreated(QObject *object);
+    void recreateOverlayItem();
 
 private:
     void selectWindow(QQuickWindow *window);
@@ -119,6 +121,7 @@ private:
                                          GammaRay::RemoteViewInterface::RequestMode mode, int& bestCandidate) const;
 
     ProbeInterface *m_probe;
+    QPointer<OverlayItem> m_overlayItem;
     QPointer<QQuickWindow> m_window;
     QPointer<QQuickItem> m_currentItem;
     QSGNode *m_currentSgNode;
