@@ -46,7 +46,7 @@ public:
     /// Get either the layout of the widget or the this-pointer
     inline QQuickLayout *layout() const
     {
-        return isLayout() ? asLayout() : nullptr/*asItem()->layout()*/;
+        return isLayout() ? asLayout() : nullptr;
     }
 
     /// Get either the parent widget of the layout or the this-pointer
@@ -60,8 +60,8 @@ public:
     QPointF pos() const;
 
     inline bool isNull() const { return !m_object; }
-    inline QObject* data() { return m_object; }
-    inline QObject* operator->() const { Q_ASSERT(!isNull()); return m_object; }
+    inline QQuickItem* data() { return m_object; }
+    inline QQuickItem* operator->() const { Q_ASSERT(!isNull()); return m_object; }
     inline void clear() { m_object = nullptr; }
 
 private:
@@ -94,13 +94,18 @@ public:
      */
     void placeOn(ItemOrLayoutFacade item);
 
-    bool eventFilter(QObject *receiver, QEvent *event) Q_DECL_OVERRIDE;
-
     void paint(QPainter *painter) Q_DECL_OVERRIDE;
 
 private:
     void resizeOverlay();
     void updatePositions();
+    void updateOverlay();
+    void itemParentChanged(QQuickItem *parent);
+    void itemWindowChanged(QQuickWindow *window);
+    void connectItemChanges(QQuickItem *item);
+    void disconnectItemChanges(QQuickItem *item);
+    void connectTopItemChanges(QQuickItem *item);
+    void disconnectTopItemChanges(QQuickItem *item);
 
     QQuickItem *m_currentToplevelItem;
     ItemOrLayoutFacade m_currentItem;

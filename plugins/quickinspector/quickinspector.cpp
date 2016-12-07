@@ -227,7 +227,7 @@ static bool isGoodCandidateItem(QQuickItem *item)
 {
     if (!item->isVisible() || item->z() < 0 || qFuzzyCompare(item->opacity() + 1.0, qreal(1.0)) ||
             !item->flags().testFlag(QQuickItem::ItemHasContents) ||
-            item->metaObject() == &QQuickItem::staticMetaObject) {
+            item->metaObject() == &QQuickItem::staticMetaObject || item->metaObject() == &OverlayItem::staticMetaObject) {
         return false;
     }
 
@@ -612,8 +612,10 @@ void QuickInspector::checkFeatures()
 
 void QuickInspector::itemSelectionChanged(const QItemSelection &selection)
 {
-    if (selection.isEmpty())
+    if (selection.isEmpty()) {
+        m_overlayItem->placeOn(ItemOrLayoutFacade());
         return;
+    }
 
     const QModelIndex index = selection.first().topLeft();
     m_currentItem = index.data(ObjectModel::ObjectRole).value<QQuickItem *>();

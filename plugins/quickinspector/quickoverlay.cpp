@@ -49,7 +49,14 @@ static QPointF itemPos(QQuickItem *item)
 static QSizeF itemSize(QQuickItem *item)
 {
     Q_ASSERT(item);
-    return QSizeF(item->width(), item->height());
+    QSizeF size = QSizeF(item->width(), item->height());
+
+    // Fallback to children rect if needed
+    if (size.isNull()) {
+        size = item->childrenRect().size();
+    }
+
+    return size;
 }
 
 static QRectF itemGeometry(QQuickItem *item)
@@ -88,8 +95,6 @@ OverlayItem::OverlayItem()
   : m_currentToplevelItem(0),
     m_drawLayoutOutlineOnly(true)
 {
-    /*setAttribute(Qt::WA_TransparentForMouseEvents);
-    setFocusPolicy(Qt::NoFocus);*/
 }
 
 void OverlayItem::show()
@@ -128,10 +133,10 @@ void OverlayItem::placeOn(ItemOrLayoutFacade item)
 {
     if (item.isNull()) {
         if (!m_currentItem.isNull())
-            m_currentItem->removeEventFilter(this);
+            disconnectItemChanges(m_currentItem.data());
 
         if (m_currentToplevelItem)
-            m_currentToplevelItem->removeEventFilter(this);
+            disconnectTopItemChanges(m_currentToplevelItem);
 
         m_currentToplevelItem = nullptr;
         m_currentItem.clear();
@@ -143,7 +148,7 @@ void OverlayItem::placeOn(ItemOrLayoutFacade item)
     }
 
     if (!m_currentItem.isNull())
-        m_currentItem->removeEventFilter(this);
+        disconnectItemChanges(m_currentItem.data());
 
     m_currentItem = item;
 
@@ -152,44 +157,21 @@ void OverlayItem::placeOn(ItemOrLayoutFacade item)
 
     if (toplevel != m_currentToplevelItem) {
         if (m_currentToplevelItem)
-            m_currentToplevelItem->removeEventFilter(this);
+            disconnectTopItemChanges(m_currentToplevelItem);
 
         m_currentToplevelItem = toplevel;
 
         setParentItem(toplevel);
-        move(0, 0);
-        resize(toplevel->width(), toplevel->height());
+        resizeOverlay();
 
-        m_currentToplevelItem->installEventFilter(this);
+        connectTopItemChanges(m_currentToplevelItem);
 
         show();
     }
 
-    m_currentItem->installEventFilter(this);
+    connectItemChanges(m_currentItem.data());
 
     updatePositions();
-}
-
-bool OverlayItem::eventFilter(QObject *receiver, QEvent *event)
-{
-    if (!m_currentItem.isNull() && m_currentToplevelItem->window() != m_currentItem.item()->window()) { // detect (un)docking
-        placeOn(m_currentItem);
-        return false;
-    }
-
-    if (receiver == m_currentItem.data()) {
-        if (event->type() == QEvent::Resize || event->type() == QEvent::Move || event->type() == QEvent::Show || event->type() == QEvent::Hide) {
-            resizeOverlay();
-            updatePositions();
-        }
-    } else if (receiver == m_currentToplevelItem) {
-        if (event->type() == QEvent::Resize) {
-            resizeOverlay();
-            updatePositions();
-        }
-    }
-
-    return false;
 }
 
 void OverlayItem::updatePositions()
@@ -251,9 +233,80 @@ void OverlayItem::updatePositions()
 void OverlayItem::resizeOverlay()
 {
     if (m_currentToplevelItem) {
+        setRotation(m_currentToplevelItem->rotation());
+        setScale(m_currentToplevelItem->scale());
+        setTransformOrigin(m_currentToplevelItem->transformOrigin());
         move(0, 0);
         resize(itemSize(m_currentToplevelItem));
     }
+}
+
+void OverlayItem::updateOverlay()
+{
+    resizeOverlay();
+    updatePositions();
+}
+
+void OverlayItem::itemParentChanged(QQuickItem *parent)
+{
+    Q_UNUSED(parent);
+    if (!m_currentItem.isNull())
+        placeOn(m_currentItem);
+}
+
+void OverlayItem::itemWindowChanged(QQuickWindow *window)
+{
+    Q_UNUSED(window);
+    if (!m_currentItem.isNull())
+        placeOn(m_currentItem);
+}
+
+void OverlayItem::connectItemChanges(QQuickItem *item)
+{
+    connect(item, &QQuickItem::childrenRectChanged, this, &OverlayItem::updateOverlay);
+    connect(item, &QQuickItem::rotationChanged, this, &OverlayItem::updateOverlay);
+    connect(item, &QQuickItem::scaleChanged, this, &OverlayItem::updateOverlay);
+    connect(item, &QQuickItem::widthChanged, this, &OverlayItem::updateOverlay);
+    connect(item, &QQuickItem::heightChanged, this, &OverlayItem::updateOverlay);
+    connect(item, &QQuickItem::xChanged, this, &OverlayItem::updateOverlay);
+    connect(item, &QQuickItem::yChanged, this, &OverlayItem::updateOverlay);
+    connect(item, &QQuickItem::zChanged, this, &OverlayItem::updateOverlay);
+    connect(item, &QQuickItem::visibleChanged, this, &OverlayItem::updateOverlay);
+    connect(item, &QQuickItem::parentChanged, this, &OverlayItem::itemParentChanged);
+    connect(item, &QQuickItem::windowChanged, this, &OverlayItem::itemWindowChanged);
+}
+
+void OverlayItem::disconnectItemChanges(QQuickItem *item)
+{
+    disconnect(item, &QQuickItem::childrenRectChanged, this, &OverlayItem::updateOverlay);
+    disconnect(item, &QQuickItem::rotationChanged, this, &OverlayItem::updateOverlay);
+    disconnect(item, &QQuickItem::scaleChanged, this, &OverlayItem::updateOverlay);
+    disconnect(item, &QQuickItem::widthChanged, this, &OverlayItem::updateOverlay);
+    disconnect(item, &QQuickItem::heightChanged, this, &OverlayItem::updateOverlay);
+    disconnect(item, &QQuickItem::xChanged, this, &OverlayItem::updateOverlay);
+    disconnect(item, &QQuickItem::yChanged, this, &OverlayItem::updateOverlay);
+    disconnect(item, &QQuickItem::zChanged, this, &OverlayItem::updateOverlay);
+    disconnect(item, &QQuickItem::visibleChanged, this, &OverlayItem::updateOverlay);
+    disconnect(item, &QQuickItem::parentChanged, this, &OverlayItem::itemParentChanged);
+    disconnect(item, &QQuickItem::windowChanged, this, &OverlayItem::itemWindowChanged);
+}
+
+void OverlayItem::connectTopItemChanges(QQuickItem *item)
+{
+    connect(item, &QQuickItem::childrenRectChanged, this, &OverlayItem::updateOverlay);
+    connect(item, &QQuickItem::rotationChanged, this, &OverlayItem::updateOverlay);
+    connect(item, &QQuickItem::scaleChanged, this, &OverlayItem::updateOverlay);
+    connect(item, &QQuickItem::widthChanged, this, &OverlayItem::updateOverlay);
+    connect(item, &QQuickItem::heightChanged, this, &OverlayItem::updateOverlay);
+}
+
+void OverlayItem::disconnectTopItemChanges(QQuickItem *item)
+{
+    disconnect(item, &QQuickItem::childrenRectChanged, this, &OverlayItem::updateOverlay);
+    disconnect(item, &QQuickItem::rotationChanged, this, &OverlayItem::updateOverlay);
+    disconnect(item, &QQuickItem::scaleChanged, this, &OverlayItem::updateOverlay);
+    disconnect(item, &QQuickItem::widthChanged, this, &OverlayItem::updateOverlay);
+    disconnect(item, &QQuickItem::heightChanged, this, &OverlayItem::updateOverlay);
 }
 
 void OverlayItem::paint(QPainter *painter)
