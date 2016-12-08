@@ -92,8 +92,7 @@ bool ItemOrLayoutFacade::isLayout() const
 }
 
 OverlayItem::OverlayItem()
-  : m_currentToplevelItem(0),
-    m_drawLayoutOutlineOnly(true)
+  : m_currentToplevelItem(0)
 {
 }
 
@@ -140,8 +139,7 @@ void OverlayItem::placeOn(ItemOrLayoutFacade item)
 
         m_currentToplevelItem = nullptr;
         m_currentItem.clear();
-        m_outerRect = QRect();
-        m_layoutPath = QPainterPath();
+        m_effectiveGeometry = QuickItemGeometry();
 
         update();
         return;
@@ -179,53 +177,7 @@ void OverlayItem::updatePositions()
     if (m_currentItem.isNull() || !m_currentToplevelItem)
         return;
 
-    if (!m_currentItem.isVisible())
-        m_outerRectColor = Qt::green;
-    else
-        m_outerRectColor = Qt::red;
-
-    const QPointF parentPos = m_currentItem.item()->mapToItem(m_currentToplevelItem, m_currentItem.pos());
-    m_outerRect = QRectF(parentPos.x(), parentPos.y(),
-                        m_currentItem.geometry().width(),
-                        m_currentItem.geometry().height()).adjusted(0, 0, -1, -1);
-
-    m_layoutPath = QPainterPath();
-
-    if (m_currentItem.layout()
-        && qstrcmp(m_currentItem.layout()->metaObject()->className(),
-                   "QMainWindowLayout") != 0) {
-        const QRectF layoutGeometry = itemGeometry(m_currentItem.layout());
-
-        const QRectF mappedOuterRect
-            = QRectF(m_currentItem.item()->mapToItem(m_currentToplevelItem,
-                                                  layoutGeometry.topLeft()), layoutGeometry.size());
-
-        QPainterPath outerPath;
-        outerPath.addRect(mappedOuterRect.adjusted(1, 1, -2, -2));
-
-        QPainterPath innerPath;
-        for (int i = 0; i < m_currentItem.layout()->itemCount(); ++i) {
-            QQuickItem *item = m_currentItem.layout()->itemAt(i);
-            if (!itemIsLayout(item) && item->isVisible())
-                continue;
-            const QRectF mappedInnerRect
-                = QRectF(m_currentItem.item()->mapToItem(m_currentToplevelItem,
-                                                      itemGeometry(item).topLeft()),
-                        itemGeometry(item).size());
-            innerPath.addRect(mappedInnerRect);
-        }
-
-        m_layoutPath.setFillRule(Qt::OddEvenFill);
-        m_layoutPath = outerPath.subtracted(innerPath);
-
-        if (m_layoutPath.isEmpty()) {
-            m_layoutPath = outerPath;
-            m_layoutPath.addPath(innerPath);
-            m_drawLayoutOutlineOnly = true;
-        } else {
-            m_drawLayoutOutlineOnly = false;
-        }
-    }
+    m_effectiveGeometry.initFrom(m_currentItem.data());
 
     update();
 }
@@ -311,16 +263,199 @@ void OverlayItem::disconnectTopItemChanges(QQuickItem *item)
 
 void OverlayItem::paint(QPainter *painter)
 {
-    QPainter &p(*painter);
-    p.setPen(m_outerRectColor);
-    p.drawRect(m_outerRect);
+    if (m_currentItem.isNull())
+        return;
+    drawDecoration(painter, m_effectiveGeometry, QRectF(QPointF(), m_currentItem.data()->window()->size()), 1.0);
+}
 
-    QBrush brush(Qt::BDiagPattern);
-    brush.setColor(Qt::blue);
+void OverlayItem::drawDecoration(QPainter *painter, const QuickItemGeometry &itemGeometry, const QRectF &viewRect,
+                                 qreal zoom)
+{
+    painter->save();
 
-    if (!m_drawLayoutOutlineOnly)
-        p.fillPath(m_layoutPath, brush);
+    // bounding box
+    painter->setPen(QColor(232, 87, 82, 170));
+    painter->setBrush(QBrush(QColor(232, 87, 82, 95)));
+    painter->drawRect(itemGeometry.boundingRect);
 
-    p.setPen(Qt::blue);
-    p.drawPath(m_layoutPath);
+    // original geometry
+    if (itemGeometry.itemRect != itemGeometry.boundingRect) {
+        painter->setPen(Qt::gray);
+        painter->setBrush(QBrush(Qt::gray, Qt::BDiagPattern));
+        painter->drawRect(itemGeometry.itemRect);
+    }
+
+    // children rect
+    if (itemGeometry.itemRect != itemGeometry.boundingRect
+        && itemGeometry.transform.isIdentity()) {
+        // If this item is transformed the children rect will be painted wrongly,
+        // so for now skip painting it.
+        painter->setPen(QColor(0, 99, 193, 170));
+        painter->setBrush(QBrush(QColor(0, 99, 193, 95)));
+        painter->drawRect(itemGeometry.childrenRect);
+    }
+
+    // transform origin
+    if (itemGeometry.itemRect != itemGeometry.boundingRect) {
+        painter->setPen(QColor(156, 15, 86, 170));
+        painter->drawEllipse(itemGeometry.transformOriginPoint, 2.5, 2.5);
+        painter->drawLine(itemGeometry.transformOriginPoint - QPointF(0, 6),
+                    itemGeometry.transformOriginPoint + QPointF(0, 6));
+        painter->drawLine(itemGeometry.transformOriginPoint - QPointF(6, 0),
+                    itemGeometry.transformOriginPoint + QPointF(6, 0));
+    }
+
+    // x and y values
+    painter->setPen(QColor(136, 136, 136));
+    if (!itemGeometry.left
+        && !itemGeometry.horizontalCenter
+        && !itemGeometry.right
+        && itemGeometry.x != 0) {
+        QPointF parentEnd
+            = (QPointF(itemGeometry.itemRect.x() - itemGeometry.x,
+                       itemGeometry.itemRect.y()));
+        QPointF itemEnd = itemGeometry.itemRect.topLeft();
+        drawArrow(painter, parentEnd, itemEnd);
+        painter->drawText(QRectF(parentEnd.x(), parentEnd.y() + 10, itemEnd.x() - parentEnd.x(), 50),
+                    Qt::AlignHCenter | Qt::TextDontClip,
+                    QStringLiteral("x: %1px").arg(itemGeometry.x / zoom));
+    }
+    if (!itemGeometry.top
+        && !itemGeometry.verticalCenter
+        && !itemGeometry.bottom
+        && !itemGeometry.baseline
+        && itemGeometry.y != 0) {
+        QPointF parentEnd
+            = (QPointF(itemGeometry.itemRect.x(),
+                       itemGeometry.itemRect.y() - itemGeometry.y));
+        QPointF itemEnd = itemGeometry.itemRect.topLeft();
+        drawArrow(painter, parentEnd, itemEnd);
+        painter->drawText(QRectF(parentEnd.x() + 10, parentEnd.y(), 100, itemEnd.y() - parentEnd.y()),
+                    Qt::AlignVCenter | Qt::TextDontClip,
+                    QStringLiteral("y: %1px").arg(itemGeometry.y / zoom));
+    }
+
+    // anchors
+    if (itemGeometry.left) {
+        drawAnchor(painter, itemGeometry, viewRect, zoom, Qt::Horizontal,
+                   itemGeometry.itemRect.left(), itemGeometry.leftMargin,
+                   QStringLiteral("margin: %1px").arg(itemGeometry.leftMargin / zoom));
+    }
+
+    if (itemGeometry.horizontalCenter) {
+        drawAnchor(painter, itemGeometry, viewRect, zoom, Qt::Horizontal,
+                   (itemGeometry.itemRect.left() + itemGeometry.itemRect.right()) / 2, itemGeometry.horizontalCenterOffset,
+                   QStringLiteral("offset: %1px").arg(itemGeometry.horizontalCenterOffset / zoom));
+    }
+
+    if (itemGeometry.right) {
+        drawAnchor(painter, itemGeometry, viewRect, zoom, Qt::Horizontal,
+                   itemGeometry.itemRect.right(), -itemGeometry.rightMargin,
+                   QStringLiteral("margin: %1px").arg(itemGeometry.rightMargin / zoom));
+    }
+
+    if (itemGeometry.top) {
+        drawAnchor(painter, itemGeometry, viewRect, zoom, Qt::Vertical,
+                   itemGeometry.itemRect.top(), itemGeometry.topMargin,
+                   QStringLiteral("margin: %1px").arg(itemGeometry.topMargin / zoom));
+    }
+
+    if (itemGeometry.verticalCenter) {
+        drawAnchor(painter, itemGeometry, viewRect, zoom, Qt::Vertical,
+                   (itemGeometry.itemRect.top() + itemGeometry.itemRect.bottom()) / 2, itemGeometry.verticalCenterOffset,
+                   QStringLiteral("offset: %1px").arg(itemGeometry.verticalCenterOffset / zoom));
+    }
+
+    if (itemGeometry.bottom) {
+        drawAnchor(painter, itemGeometry, viewRect, zoom, Qt::Vertical,
+                   itemGeometry.itemRect.bottom(), -itemGeometry.bottomMargin,
+                   QStringLiteral("margin: %1px").arg(itemGeometry.bottomMargin / zoom));
+    }
+
+    if (itemGeometry.baseline) {
+        drawAnchor(painter, itemGeometry, viewRect, zoom, Qt::Vertical,
+                   itemGeometry.itemRect.top(), itemGeometry.baselineOffset,
+                   QStringLiteral("offset: %1px").arg(itemGeometry.baselineOffset / zoom));
+    }
+
+    painter->restore();
+}
+
+void OverlayItem::drawArrow(QPainter *p, QPointF first, QPointF second)
+{
+    p->drawLine(first, second);
+    QPointF vector(second - first);
+    QMatrix m;
+    m.rotate(30);
+    QVector2D v1 = QVector2D(m.map(vector)).normalized() * 10;
+    m.rotate(-60);
+    QVector2D v2 = QVector2D(m.map(vector)).normalized() * 10;
+    p->drawLine(first, first + v1.toPointF());
+    p->drawLine(first, first + v2.toPointF());
+    p->drawLine(second, second - v1.toPointF());
+    p->drawLine(second, second - v2.toPointF());
+}
+
+void OverlayItem::drawAnchor(QPainter *p, const QuickItemGeometry &itemGeometry, const QRectF &viewRect, qreal zoom,
+                             Qt::Orientation orientation, qreal ownAnchorLine, qreal offset, const QString &label)
+{
+    qreal foreignAnchorLine = ownAnchorLine - offset;
+    QPen pen(QColor(139, 179, 0));
+
+    // Margin arrow
+    if (offset) {
+        p->setPen(pen);
+        if (orientation == Qt::Horizontal) {
+            drawArrow(p,
+                      QPointF(foreignAnchorLine,
+                              (itemGeometry.itemRect.top()
+                               + itemGeometry.itemRect.bottom()) / 2),
+                      QPointF(ownAnchorLine,
+                              (itemGeometry.itemRect.top()
+                               + itemGeometry.itemRect.bottom()) / 2));
+        } else {
+            drawArrow(p,
+                      QPointF((itemGeometry.itemRect.left()
+                               + itemGeometry.itemRect.right()) / 2, foreignAnchorLine),
+                      QPointF((itemGeometry.itemRect.left()
+                               + itemGeometry.itemRect.right()) / 2, ownAnchorLine));
+        }
+
+        // Margin text
+        if (orientation == Qt::Horizontal) {
+            p->drawText(
+                QRectF(foreignAnchorLine,
+                       (itemGeometry.itemRect.top()
+                        + itemGeometry.itemRect.bottom()) / 2 + 10, offset, 50),
+                Qt::AlignHCenter | Qt::TextDontClip,
+                label);
+        } else {
+            p->drawText(
+                QRectF((itemGeometry.itemRect.left()
+                        + itemGeometry.itemRect.right()) / 2 + 10,
+                       foreignAnchorLine, 100, offset),
+                Qt::AlignVCenter | Qt::TextDontClip,
+                label);
+        }
+    }
+
+    // Own Anchor line
+    pen.setWidth(2);
+    p->setPen(pen);
+    if (orientation == Qt::Horizontal)
+        p->drawLine(ownAnchorLine,
+                    itemGeometry.itemRect.top(), ownAnchorLine,
+                    itemGeometry.itemRect.bottom());
+    else
+        p->drawLine(
+            itemGeometry.itemRect.left(), ownAnchorLine,
+            itemGeometry.itemRect.right(), ownAnchorLine);
+
+    // Foreign Anchor line
+    pen.setStyle(Qt::DotLine);
+    p->setPen(pen);
+    if (orientation == Qt::Horizontal)
+        p->drawLine(foreignAnchorLine, 0, foreignAnchorLine, viewRect.height() * zoom);
+    else
+        p->drawLine(0, foreignAnchorLine, viewRect.width() * zoom, foreignAnchorLine);
 }

@@ -32,6 +32,8 @@
 #include <QQuickPaintedItem>
 #include <3rdparty/qt/5.5/private/qquicklayout_p.h>
 
+#include "quickitemgeometry.h"
+
 class QQuickLayout;
 
 namespace GammaRay {
@@ -96,7 +98,13 @@ public:
 
     void paint(QPainter *painter) Q_DECL_OVERRIDE;
 
+    static void drawDecoration(QPainter *painter, const QuickItemGeometry &itemGeometry, const QRectF &viewRect,
+                               qreal zoom);
+
 private:
+    static void drawArrow(QPainter *p, QPointF first, QPointF second);
+    static void drawAnchor(QPainter *p, const QuickItemGeometry &itemGeometry, const QRectF &viewRect, qreal zoom,
+                           Qt::Orientation orientation, qreal ownAnchorLine, qreal offset, const QString &label);
     void resizeOverlay();
     void updatePositions();
     void updateOverlay();
@@ -109,11 +117,7 @@ private:
 
     QQuickItem *m_currentToplevelItem;
     ItemOrLayoutFacade m_currentItem;
-    QRectF m_outerRect;
-    QColor m_outerRectColor;
-
-    QPainterPath m_layoutPath;
-    bool m_drawLayoutOutlineOnly;
+    QuickItemGeometry m_effectiveGeometry;
 };
 }
 
