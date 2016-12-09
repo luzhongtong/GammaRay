@@ -93,7 +93,21 @@ bool ItemOrLayoutFacade::isLayout() const
 
 OverlayItem::OverlayItem()
   : m_currentToplevelItem(0)
+  , m_isGrabbingMode(false)
 {
+}
+
+bool OverlayItem::isGrabbingMode() const
+{
+    return m_isGrabbingMode;
+}
+
+void OverlayItem::setIsGrabbingMode(bool isGrabbingMode)
+{
+    if (m_isGrabbingMode == isGrabbingMode)
+        return;
+    m_isGrabbingMode = isGrabbingMode;
+    update();
 }
 
 void OverlayItem::show()
@@ -263,7 +277,7 @@ void OverlayItem::disconnectTopItemChanges(QQuickItem *item)
 
 void OverlayItem::paint(QPainter *painter)
 {
-    if (m_currentItem.isNull())
+    if (m_isGrabbingMode || m_currentItem.isNull())
         return;
     drawDecoration(painter, m_effectiveGeometry, QRectF(QPointF(), m_currentItem.data()->window()->size()), 1.0);
 }

@@ -28,6 +28,7 @@
 
 #include "quickinspector.h"
 #include "quickoverlay.h"
+#include "quickwindowgrabber.h"
 #include "quickitemmodel.h"
 #include "quickscenegraphmodel.h"
 #include "quickpaintanalyzerextension.h"
@@ -56,6 +57,9 @@
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QQuickView>
+#if defined(QT_QUICKWIDGETS_LIB)
+#include <QQuickWidget>
+#endif
 
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -245,7 +249,7 @@ QuickInspector::QuickInspector(ProbeInterface *probe, QObject *parent)
     , m_sgPropertyController(new PropertyController(QStringLiteral(
                                                         "com.kdab.GammaRay.QuickSceneGraph"), this))
     , m_remoteView(new RemoteViewServer(QStringLiteral("com.kdab.GammaRay.QuickRemoteView"), this))
-    , m_isGrabbingWindow(false)
+    , m_grabber(new QuickWindowGrabber(this))
 {
     registerPCExtensions();
     registerMetaTypes();
@@ -296,7 +300,11 @@ QuickInspector::QuickInspector(ProbeInterface *probe, QObject *parent)
     connect(m_remoteView, &RemoteViewServer::elementsAtRequested, this, &QuickInspector::requestElementsAt);
     connect(this, &QuickInspector::elementsAtReceived, m_remoteView, &RemoteViewServer::elementsAtReceived);
     connect(m_remoteView, &RemoteViewServer::doPickElementId, this, &QuickInspector::pickElementId);
+    connect(m_grabber, &QuickWindowGrabber::sceneChanged, m_remoteView, &RemoteViewServer::sourceChanged);
     connect(m_remoteView, &RemoteViewServer::requestUpdate, this, &QuickInspector::slotGrabWindow);
+    // delay this so we can process the signals to sourceChanged first, while we are in the grabbing state
+    // otherwise we end up with an infinite update loop even on static scenes
+    connect(m_grabber, &QuickWindowGrabber::sceneGrabbed, this, &QuickInspector::sendRenderedScene, Qt::QueuedConnection);
 }
 
 QuickInspector::~QuickInspector()
@@ -319,24 +327,16 @@ void QuickInspector::selectWindow(QQuickWindow *window)
         return;
     }
 
-    if (m_window) {
-        disconnect(m_window, nullptr, this, nullptr);
-    }
-
     m_window = window;
     m_itemModel->setWindow(window);
     m_sgModel->setWindow(window);
     m_remoteView->setEventReceiver(m_window);
     m_remoteView->resetView();
+    m_grabber->setWindow(m_window);
 
     if (m_window) {
         // make sure we have selected something for the property editor to not be entirely empty
         selectItem(m_window->contentItem());
-
-        // frame swapped isn't enough, we don't get that for FBO render targets such as in QQuickWidget
-        connect(window, &QQuickWindow::afterRendering, this, &QuickInspector::slotSceneChanged);
-        connect(window, &QQuickWindow::frameSwapped, this, &QuickInspector::slotSceneChanged);
-
         m_window->update();
     }
 }
@@ -423,6 +423,7 @@ void QuickInspector::recreateOverlayItem()
     ProbeGuard guard;
     m_overlayItem = new OverlayItem;
     m_overlayItem->hide();
+    m_grabber->setOverlayItem(m_overlayItem);
 
     // the target application might have destroyed the overlay widget
     // (e.g. because the parent of the overlay got destroyed).
@@ -433,48 +434,25 @@ void QuickInspector::recreateOverlayItem()
 
 void QuickInspector::sendRenderedScene(const QImage &currentFrame)
 {
-    m_isGrabbingWindow = false;
 
     RemoteViewFrame frame;
     frame.setImage(currentFrame);
     QuickItemGeometry itemGeometry;
     if (m_currentItem)
         itemGeometry.initFrom(m_currentItem);
-    frame.setSceneRect(QRectF(
-                           currentFrame.rect()) | itemGeometry.itemRect | itemGeometry.childrenRect
-                       | itemGeometry.boundingRect);
+    frame.setSceneRect(QRectF(currentFrame.rect()) | itemGeometry.itemRect |
+                       itemGeometry.childrenRect | itemGeometry.boundingRect);
     frame.setData(QVariant::fromValue(itemGeometry));
     m_remoteView->sendFrame(frame);
 }
 
-void QuickInspector::slotSceneChanged()
-{
-    if (!m_isGrabbingWindow)
-        m_remoteView->sourceChanged();
-}
-
 void QuickInspector::slotGrabWindow()
 {
-    if (!m_remoteView->isActive() || !m_window || m_isGrabbingWindow)
+    if (!m_remoteView->isActive() || !m_window)
         return;
 
     Q_ASSERT(QThread::currentThread() == QCoreApplication::instance()->thread());
-    m_isGrabbingWindow = true;
-    foreach (const auto callback, m_grabWindowCallbacks) {
-        if (callback(m_window))
-            return;
-    }
-
-    // delay this so we can process the signals to slotSceneChanged first, while we are in the m_isGrabbingWindow state
-    // otherwise we end up with an infinite update loop even on static scenes
-    auto img = m_window->grabWindow();
-    // See QTBUG-53795
-#if QT_VERSION >= QT_VERSION_CHECK(5, 4, 0)
-    img.setDevicePixelRatio(m_window->effectiveDevicePixelRatio());
-#elif QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
-    img.setDevicePixelRatio(m_window->devicePixelRatio());
-#endif
-    QMetaObject::invokeMethod(this, "sendRenderedScene", Qt::QueuedConnection, Q_ARG(QImage, img));
+    m_grabber->requestGrabWindow();
 }
 
 static QByteArray renderModeToString(GammaRay::QuickInspectorInterface::RenderMode customRenderMode)
@@ -684,11 +662,6 @@ ObjectIds QuickInspector::recursiveItemsAt(QQuickItem *parent, const QPointF &po
     }
 
     return objects;
-}
-
-void GammaRay::QuickInspector::registerGrabWindowCallback(GrabWindowCallback callback)
-{
-    m_grabWindowCallbacks.push_back(callback);
 }
 
 bool QuickInspector::eventFilter(QObject *receiver, QEvent *event)

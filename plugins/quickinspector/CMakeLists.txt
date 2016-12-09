@@ -10,6 +10,7 @@ if(Qt5Quick_FOUND AND HAVE_PRIVATE_Qt5Quick_HEADERS AND NOT ${Qt5Quick_VERSION} 
         quickinspectorinterface.cpp
         quickitemgeometry.cpp
         quickoverlay.cpp
+        quickwindowgrabber.cpp
         materialextension/materialextensioninterface.cpp
       )
 
@@ -17,6 +18,9 @@ if(Qt5Quick_FOUND AND HAVE_PRIVATE_Qt5Quick_HEADERS AND NOT ${Qt5Quick_VERSION} 
 
   add_library(gammaray_quickinspector_shared STATIC ${gammaray_quickinspector_shared_srcs})
   target_link_libraries(gammaray_quickinspector_shared gammaray_common Qt5::Gui Qt5::Quick)
+  if(Qt5QuickWidgets_FOUND)
+    target_link_libraries(gammaray_quickinspector_shared Qt5::QuickWidgets)
+  endif()
   set_target_properties(gammaray_quickinspector_shared PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
   set(gammaray_quickinspector_srcs
@@ -40,6 +44,9 @@ if(Qt5Quick_FOUND AND HAVE_PRIVATE_Qt5Quick_HEADERS AND NOT ${Qt5Quick_VERSION} 
     gammaray_core Qt5::Quick
     gammaray_kitemmodels
   )
+  if(Qt5QuickWidgets_FOUND)
+    target_link_libraries(gammaray_quickinspector Qt5::QuickWidgets)
+  endif()
 
   if(GAMMARAY_BUILD_UI)
     # ui plugin

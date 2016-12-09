@@ -81,6 +81,9 @@ class OverlayItem : public QQuickPaintedItem
 public:
     OverlayItem();
 
+    bool isGrabbingMode() const;
+    void setIsGrabbingMode(bool isGrabbingMode);
+
     // C++ Helpers
     void show();
     void hide();
@@ -118,6 +121,7 @@ private:
     QQuickItem *m_currentToplevelItem;
     ItemOrLayoutFacade m_currentItem;
     QuickItemGeometry m_effectiveGeometry;
+    bool m_isGrabbingMode;
 };
 }
 

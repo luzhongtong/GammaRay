@@ -55,6 +55,7 @@ QT_END_NAMESPACE
 namespace GammaRay {
 class PropertyController;
 class OverlayItem;
+class QuickWindowGrabber;
 class QuickItemModel;
 class QuickSceneGraphModel;
 class RemoteViewServer;
@@ -70,8 +71,6 @@ public:
     explicit QuickInspector(ProbeInterface *probe, QObject *parent = nullptr);
     ~QuickInspector();
 
-    typedef bool (*GrabWindowCallback)(QQuickWindow *);
-
 signals:
     void elementsAtReceived(const GammaRay::ObjectIds &ids, int bestCandidate);
 
@@ -86,18 +85,12 @@ public slots:
     void requestElementsAt(const QPoint &pos, GammaRay::RemoteViewInterface::RequestMode mode);
     void pickElementId(const GammaRay::ObjectId& id);
 
-    /** Allow other plugins to provide specific window grabbing callbacks.
-     *  Needed for QQuickWidget.
-     */
-    void registerGrabWindowCallback(GrabWindowCallback callback);
-
     void sendRenderedScene(const QImage &currentFrame);
 
 protected:
     bool eventFilter(QObject *receiver, QEvent *event) Q_DECL_OVERRIDE;
 
 private slots:
-    void slotSceneChanged();
     void slotGrabWindow();
     void itemSelectionChanged(const QItemSelection &selection);
     void sgSelectionChanged(const QItemSelection &selection);
@@ -134,8 +127,7 @@ private:
     PropertyController *m_sgPropertyController;
     RemoteViewServer *m_remoteView;
     QImage m_currentFrame;
-    QVector<GrabWindowCallback> m_grabWindowCallbacks;
-    bool m_isGrabbingWindow;
+    QuickWindowGrabber *m_grabber;
     struct {
         RenderMode mode;
         QMetaObject::Connection connection;
